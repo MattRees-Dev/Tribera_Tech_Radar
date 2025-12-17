@@ -14,13 +14,14 @@ const Ring = require('../models/ring')
 const Blip = require('../models/blip')
 const GraphingRadar = require('../graphing/radar')
 const MalformedDataError = require('../exceptions/malformedDataError')
-const SheetNotFoundError = require('../exceptions/sheetNotFoundError')
 const ContentValidator = require('./contentValidator')
 const Sheet = require('./sheet')
 const ExceptionMessages = require('./exceptionMessages')
 const GoogleAuth = require('./googleAuth')
 const config = require('../config')
 const featureToggles = config().featureToggles
+const { getDefaultRadarSheet } = require('../config/defaultRadarConfig')
+const { companyName, companyUrl } = require('../config/brandingConfig')
 const { getDocumentOrSheetId, getSheetName } = require('./urlUtils')
 const { getGraphSize, graphConfig, isValidConfig } = require('../graphing/config')
 const InvalidConfigError = require('../exceptions/invalidConfigError')
@@ -143,19 +144,58 @@ const plotRadarGraph = function (title, blips, currentRadarName, alternativeRada
   new GraphingRadar(size, radar).init().plot()
 }
 
+const CSVDocument = function (url) {
+  var self = {}
+
+  self.build = function () {
+    d3.csv(url)
+      .then(createBlips)
+      .catch((exception) => {
+        const fileNotFoundError = new FileNotFoundError(`Oops! We can't find the CSV file you've entered`)
+        plotErrorMessage(featureToggles.UIRefresh2022 ? fileNotFoundError : exception, 'csv')
+      })
+  }
+
+  var createBlips = function (data) {
+    try {
+      var columnNames = data.columns
+      delete data.columns
+      var contentValidator = new ContentValidator(columnNames)
+      contentValidator.verifyContent()
+      contentValidator.verifyHeaders()
+      var blips = _.map(data, new InputSanitizer().sanitize)
+      featureToggles.UIRefresh2022
+        ? plotRadarGraph(FileName(url), blips, 'CSV File', [])
+        : plotRadar(FileName(url), blips, 'CSV File', [])
+    } catch (exception) {
+      const invalidContentError = new InvalidContentError(ExceptionMessages.INVALID_CSV_CONTENT)
+      plotErrorMessage(featureToggles.UIRefresh2022 ? invalidContentError : exception, 'csv')
+    }
+  }
+
+  self.init = function () {
+    plotLoading()
+    return self
+  }
+
+  return self
+}
+
 const GoogleSheet = function (sheetReference, sheetName) {
   var self = {}
 
   self.build = function () {
-    var sheet = new Sheet(sheetReference)
-    sheet.validate(function (error, apiKeyEnabled) {
-      if (error instanceof SheetNotFoundError) {
-        plotErrorMessage(error, 'sheet')
-        return
-      }
-
-      self.authenticate(false, apiKeyEnabled)
-    })
+    const apiKeyEnabled = process.env.API_KEY || false
+    // If no API_KEY is set, try using CSV export URL (works for public sheets without API key)
+    if (!apiKeyEnabled) {
+      const sheet = new Sheet(sheetReference)
+      const csvExportUrl = `https://docs.google.com/spreadsheets/d/${sheet.id}/export?format=csv&gid=0`
+      // Fallback to CSV loading for public sheets
+      const csvSheet = CSVDocument(csvExportUrl)
+      csvSheet.init().build()
+      return
+    }
+    self.authenticate(false, apiKeyEnabled)
   }
 
   function createBlipsForProtectedSheet(documentTitle, values, sheetNames) {
@@ -201,43 +241,6 @@ const GoogleSheet = function (sheetReference, sheetName) {
         }
       }
     })
-  }
-
-  self.init = function () {
-    plotLoading()
-    return self
-  }
-
-  return self
-}
-
-const CSVDocument = function (url) {
-  var self = {}
-
-  self.build = function () {
-    d3.csv(url)
-      .then(createBlips)
-      .catch((exception) => {
-        const fileNotFoundError = new FileNotFoundError(`Oops! We can't find the CSV file you've entered`)
-        plotErrorMessage(featureToggles.UIRefresh2022 ? fileNotFoundError : exception, 'csv')
-      })
-  }
-
-  var createBlips = function (data) {
-    try {
-      var columnNames = data.columns
-      delete data.columns
-      var contentValidator = new ContentValidator(columnNames)
-      contentValidator.verifyContent()
-      contentValidator.verifyHeaders()
-      var blips = _.map(data, new InputSanitizer().sanitize)
-      featureToggles.UIRefresh2022
-        ? plotRadarGraph(FileName(url), blips, 'CSV File', [])
-        : plotRadar(FileName(url), blips, 'CSV File', [])
-    } catch (exception) {
-      const invalidContentError = new InvalidContentError(ExceptionMessages.INVALID_CSV_CONTENT)
-      plotErrorMessage(featureToggles.UIRefresh2022 ? invalidContentError : exception, 'csv')
-    }
   }
 
   self.init = function () {
@@ -325,8 +328,8 @@ const Factory = function () {
     })
 
     const domainName = DomainName(window.location.search.substring(1))
-
     const paramId = getDocumentOrSheetId()
+
     if (paramId && paramId.endsWith('.csv')) {
       sheet = CSVDocument(paramId)
       sheet.init().build()
@@ -338,6 +341,12 @@ const Factory = function () {
       sheet = GoogleSheet(paramId, sheetName)
       sheet.init().build()
     } else {
+      const defaultRadarSheet = getDefaultRadarSheet()
+      if (defaultRadarSheet && defaultRadarSheet.sheetId) {
+        sheet = GoogleSheet(defaultRadarSheet.sheetId, defaultRadarSheet.sheetName)
+        sheet.init().build()
+        return
+      }
       if (!featureToggles.UIRefresh2022) {
         document.body.style.opacity = '1'
         document.body.innerHTML = ''
@@ -362,7 +371,8 @@ const Factory = function () {
 }
 
 function setDocumentTitle() {
-  document.title = 'Build your own Radar'
+  const defaultRadarSheet = getDefaultRadarSheet()
+  document.title = (defaultRadarSheet && defaultRadarSheet.title) || 'Company Tech Radar'
 }
 
 function plotLoading(content) {
@@ -390,7 +400,7 @@ function plotLogo(content) {
   content
     .append('div')
     .attr('class', 'input-sheet__logo')
-    .html('<a href="https://www.thoughtworks.com"><img src="/images/tw-logo.png" alt="logo"/ ></a>')
+    .html('<a href="' + companyUrl + '"><img src="/images/tw-logo.png" alt="' + companyName + ' logo"/ ></a>')
 }
 
 function plotFooter(content) {
@@ -401,10 +411,12 @@ function plotFooter(content) {
     .attr('class', 'footer-content')
     .append('p')
     .html(
-      'Powered by <a href="https://www.thoughtworks.com"> Thoughtworks</a>. ' +
-        'By using this service you agree to <a href="https://www.thoughtworks.com/radar/tos">Thoughtworks\' terms of use</a>. ' +
-        'You also agree to our <a href="https://www.thoughtworks.com/privacy-policy">privacy policy</a>, which describes how we will gather, use and protect any personal data contained in your public Google Sheet. ' +
-        'This software is <a href="https://github.com/thoughtworks/build-your-own-radar">open source</a> and available for download and self-hosting.',
+      'Powered by <a href="' +
+        companyUrl +
+        '"> ' +
+        companyName +
+        '</a>. ' +
+        'Based on the open source project <a href="https://github.com/thoughtworks/build-your-own-radar">Build Your Own Radar</a>.',
     )
 }
 

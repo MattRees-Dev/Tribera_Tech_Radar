@@ -212,12 +212,15 @@ header {
     width: 100%;
     display: flex;
     align-items: center;
+    justify-content: flex-start;
 
     div {
       display: flex;
       flex-direction: row;
+      align-items: center;
+      justify-content: flex-start;
 
-      margin: auto;
+      margin: 0;
       width: 90%;
 
       @include layout-margin(1, $screen-small);
@@ -238,9 +241,8 @@ header {
         border-bottom: none;
 
         img {
-          height: 20px;
-          width: auto;
-          margin-top: 1.5px;
+          width: 200px;
+          height: auto;
         }
       }
     }

@@ -3,15 +3,16 @@
 const webpack = require('webpack')
 const path = require('path')
 const buildPath = path.resolve(__dirname, 'dist')
-const args = require('yargs').argv
+const fs = require('fs')
+const dotenv = require('dotenv')
 
 const HtmlWebpackPlugin = require('html-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 
-const env = args.envFile
-if (env) {
-  // Load env file
-  require('dotenv').config({ path: env })
+// Load environment variables from .env and .env.local if present
+dotenv.config()
+if (fs.existsSync(path.resolve(__dirname, '.env.local'))) {
+  dotenv.config({ path: path.resolve(__dirname, '.env.local'), override: true })
 }
 
 const common = ['./src/common.js']
@@ -33,6 +34,12 @@ const plugins = [
     'process.env.RINGS': JSON.stringify(process.env.RINGS),
     'process.env.QUADRANTS': JSON.stringify(process.env.QUADRANTS),
     'process.env.ADOBE_LAUNCH_SCRIPT_URL': JSON.stringify(process.env.ADOBE_LAUNCH_SCRIPT_URL),
+    'process.env.DEFAULT_RADAR_SHEET_ID': JSON.stringify(process.env.DEFAULT_RADAR_SHEET_ID),
+    'process.env.DEFAULT_RADAR_SHEET_URL': JSON.stringify(process.env.DEFAULT_RADAR_SHEET_URL),
+    'process.env.DEFAULT_RADAR_SHEET_NAME': JSON.stringify(process.env.DEFAULT_RADAR_SHEET_NAME),
+    'process.env.DEFAULT_RADAR_TITLE': JSON.stringify(process.env.DEFAULT_RADAR_TITLE),
+    'process.env.COMPANY_NAME': JSON.stringify(process.env.COMPANY_NAME),
+    'process.env.COMPANY_URL': JSON.stringify(process.env.COMPANY_URL),
   }),
 ]
 
