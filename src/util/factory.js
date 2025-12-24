@@ -14,6 +14,7 @@ const Ring = require('../models/ring')
 const Blip = require('../models/blip')
 const GraphingRadar = require('../graphing/radar')
 const MalformedDataError = require('../exceptions/malformedDataError')
+const SheetNotFoundError = require('../exceptions/sheetNotFoundError')
 const ContentValidator = require('./contentValidator')
 const Sheet = require('./sheet')
 const ExceptionMessages = require('./exceptionMessages')
@@ -158,7 +159,45 @@ const CSVDocument = function (url) {
 
   var createBlips = function (data) {
     try {
-      var columnNames = data.columns
+      // Debug: log parsed CSV columns and sample rows to help diagnose invalid CSV issues
+      try {
+        // Some CSVs may not have `columns` set; guard the log to avoid errors
+        // eslint-disable-next-line no-console
+        console.log('[BYOR] Parsed CSV columns:', data.columns)
+        // eslint-disable-next-line no-console
+        console.log('[BYOR] Parsed CSV first rows sample:', data.slice ? data.slice(0, 3) : data)
+      } catch (e) {
+        // ignore logging errors
+      }
+
+      // Remap malformed header key (e.g., '\\' or backslash) to 'name'
+      if (data && data.length > 0) {
+        const firstRow = data[0]
+        const keys = Object.keys(firstRow)
+        // Look for a key that looks like a malformed/escaped character and remap it to 'name'
+        const badKey = keys.find((k) => k === '\\' || k === '\\\\' || (k.length <= 2 && /[\\/"'`]/.test(k)))
+        if (badKey && !firstRow.name) {
+          // Remap all rows: copy badKey value to 'name' key
+          data = data.map(function (row) {
+            const newRow = {}
+            Object.keys(row).forEach(function (key) {
+              if (key === badKey) {
+                newRow.name = row[key]
+              } else {
+                newRow[key] = row[key]
+              }
+            })
+            return newRow
+          })
+        }
+      }
+
+      // Use actual data row keys as column names
+      columnNames = []
+      if (data && data.length > 0) {
+        columnNames = Object.keys(data[0])
+      }
+      // Pass column names directly to ContentValidator (it will trim them)
       delete data.columns
       var contentValidator = new ContentValidator(columnNames)
       contentValidator.verifyContent()
@@ -168,8 +207,17 @@ const CSVDocument = function (url) {
         ? plotRadarGraph(FileName(url), blips, 'CSV File', [])
         : plotRadar(FileName(url), blips, 'CSV File', [])
     } catch (exception) {
-      const invalidContentError = new InvalidContentError(ExceptionMessages.INVALID_CSV_CONTENT)
-      plotErrorMessage(featureToggles.UIRefresh2022 ? invalidContentError : exception, 'csv')
+      // Build a more helpful invalid content error including parsed headers and a sample of rows
+      try {
+        const sample = (data && data.slice ? data.slice(0, 3) : data) || []
+        const headerInfo = (Array.isArray(columnNames) ? columnNames : []).join(', ')
+        const details = ` Parsed headers: ${headerInfo}. Sample rows: ${JSON.stringify(sample)}`
+        const invalidContentError = new InvalidContentError(ExceptionMessages.INVALID_CSV_CONTENT + details)
+        plotErrorMessage(featureToggles.UIRefresh2022 ? invalidContentError : exception, 'csv')
+      } catch (e) {
+        const invalidContentError = new InvalidContentError(ExceptionMessages.INVALID_CSV_CONTENT)
+        plotErrorMessage(featureToggles.UIRefresh2022 ? invalidContentError : exception, 'csv')
+      }
     }
   }
 
