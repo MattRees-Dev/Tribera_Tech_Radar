@@ -10,7 +10,8 @@ var DISCOVERY_DOCS = ['https://sheets.googleapis.com/$discovery/rest?version=v4'
 
 // Authorization scopes required by the API multiple scopes can be
 // included, separated by spaces.
-var SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly'
+// Note: Using 'spreadsheets' instead of 'spreadsheets.readonly' to allow both read and write operations
+var SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
 
 const GoogleAuth = function () {
   const self = {}
